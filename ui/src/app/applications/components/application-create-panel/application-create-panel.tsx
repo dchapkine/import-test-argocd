@@ -269,7 +269,10 @@ export const ApplicationCreatePanel = (props: {
                                                             qeId='application-create-field-repository-url'
                                                             field='spec.source.repoURL'
                                                             component={AutocompleteField}
-                                                            componentProps={{items: repos}}
+                                                            componentProps={{
+                                                                items: repos,
+                                                                filterSuggestions: true
+                                                            }}
                                                         />
                                                     </div>
                                                     <div className='columns small-2'>
@@ -361,7 +364,8 @@ export const ApplicationCreatePanel = (props: {
                                                                             field='spec.source.targetRevision'
                                                                             component={AutocompleteField}
                                                                             componentProps={{
-                                                                                items: (selectedChart && selectedChart.versions) || []
+                                                                                items: (selectedChart && selectedChart.versions) || [],
+                                                                                filterSuggestions: true
                                                                             }}
                                                                         />
                                                                         <RevisionHelpIcon type='helm' />
@@ -384,7 +388,10 @@ export const ApplicationCreatePanel = (props: {
                                                                 label='Cluster URL'
                                                                 qeId='application-create-field-cluster-url'
                                                                 field='spec.destination.server'
-                                                                componentProps={{items: clusters.map(cluster => cluster.server)}}
+                                                                componentProps={{
+                                                                    items: clusters.map(cluster => cluster.server),
+                                                                    filterSuggestions: true
+                                                                }}
                                                                 component={AutocompleteField}
                                                             />
                                                         </div>
@@ -395,7 +402,10 @@ export const ApplicationCreatePanel = (props: {
                                                                 label='Cluster Name'
                                                                 qeId='application-create-field-cluster-name'
                                                                 field='spec.destination.name'
-                                                                componentProps={{items: clusters.map(cluster => cluster.name)}}
+                                                                componentProps={{
+                                                                    items: clusters.map(cluster => cluster.name),
+                                                                    filterSuggestions: true
+                                                                }}
                                                                 component={AutocompleteField}
                                                             />
                                                         </div>
