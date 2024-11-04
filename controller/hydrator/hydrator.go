@@ -26,7 +26,7 @@ type Dependencies interface {
 	GetProcessableAppProj(app *appv1.Application) (*appv1.AppProject, error)
 	GetProcessableApps() (*appv1.ApplicationList, error)
 	GetRepoObjs(app *appv1.Application, source appv1.ApplicationSource, revision string, project *appv1.AppProject) ([]*unstructured.Unstructured, *apiclient.ManifestResponse, error)
-	GetWriteCredentials(ctx context.Context, repoURL string) (*appv1.Repository, error)
+	GetWriteCredentials(ctx context.Context, repoURL string, project string) (*appv1.Repository, error)
 	ResolveGitRevision(repoURL, targetRevision string) (string, error)
 	RequestAppRefresh(appName string)
 	// TODO: only allow access to the hydrator status
@@ -263,10 +263,10 @@ func (h *Hydrator) hydrate(logCtx *log.Entry, apps []*appv1.Application, revisio
 			Path:           app.Spec.SourceHydrator.DrySource.Path,
 			TargetRevision: app.Spec.SourceHydrator.DrySource.TargetRevision,
 		}
-		targetRevision := app.Spec.SourceHydrator.DrySource.TargetRevision
+		//targetRevision := app.Spec.SourceHydrator.DrySource.TargetRevision
 
 		// TODO: enable signature verification
-		objs, resp, err := h.dependencies.GetRepoObjs(app, drySource, targetRevision, project)
+		objs, resp, err := h.dependencies.GetRepoObjs(app, drySource, revision, project)
 		if err != nil {
 			return "", fmt.Errorf("failed to get repo objects: %w", err)
 		}
@@ -288,7 +288,8 @@ func (h *Hydrator) hydrate(logCtx *log.Entry, apps []*appv1.Application, revisio
 		})
 	}
 
-	repo, err := h.dependencies.GetWriteCredentials(context.Background(), repoURL)
+	// FIXME: handle project-scoped credentials
+	repo, err := h.dependencies.GetWriteCredentials(context.Background(), repoURL, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to get hydrator credentials: %w", err)
 	}
