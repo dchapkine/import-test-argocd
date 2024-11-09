@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/MicahParks/keyfunc"
@@ -17,10 +16,9 @@ import (
 
 // JWKSVerifier handles verification of JWTs using a JWKS endpoint
 type JWKSVerifier struct {
-	jwks        *keyfunc.JWKS
-	config      *settings.JWKSConfig
-	client      *http.Client
-	refreshLock sync.RWMutex
+	jwks   *keyfunc.JWKS
+	config *settings.JWKSConfig
+	client *http.Client
 }
 
 // NewJWKSVerifier creates a new JWKS verifier with the given configuration
