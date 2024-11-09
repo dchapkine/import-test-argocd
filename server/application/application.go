@@ -510,6 +510,10 @@ func (s *Server) GetManifests(ctx context.Context, q *application.ApplicationMan
 			if err != nil {
 				return fmt.Errorf("error getting kustomize settings options: %w", err)
 			}
+			installationID, err := s.settingsMgr.GetInstallationID()
+			if err != nil {
+				return fmt.Errorf("error getting installation ID: %w", err)
+			}
 
 			manifestInfo, err := client.GenerateManifest(ctx, &apiclient.ManifestRequest{
 				Repo:                            repo,
@@ -531,6 +535,7 @@ func (s *Server) GetManifests(ctx context.Context, q *application.ApplicationMan
 				HasMultipleSources:              a.Spec.HasMultipleSources(),
 				RefSources:                      refSources,
 				AnnotationManifestGeneratePaths: a.GetAnnotation(v1alpha1.AnnotationKeyManifestGeneratePaths),
+				InstallationID:                  installationID,
 			})
 			if err != nil {
 				return fmt.Errorf("error generating manifests: %w", err)
@@ -552,7 +557,7 @@ func (s *Server) GetManifests(ctx context.Context, q *application.ApplicationMan
 				return nil, fmt.Errorf("error unmarshaling manifest into unstructured: %w", err)
 			}
 			if obj.GetKind() == kube.SecretKind && obj.GroupVersionKind().Group == "" {
-				obj, _, err = diff.HideSecretData(obj, nil)
+				obj, _, err = diff.HideSecretData(obj, nil, s.settingsMgr.GetSensitiveAnnotations())
 				if err != nil {
 					return nil, fmt.Errorf("error hiding secret data: %w", err)
 				}
@@ -679,7 +684,7 @@ func (s *Server) GetManifestsWithFiles(stream application.ApplicationService_Get
 			return fmt.Errorf("error unmarshaling manifest into unstructured: %w", err)
 		}
 		if obj.GetKind() == kube.SecretKind && obj.GroupVersionKind().Group == "" {
-			obj, _, err = diff.HideSecretData(obj, nil)
+			obj, _, err = diff.HideSecretData(obj, nil, s.settingsMgr.GetSensitiveAnnotations())
 			if err != nil {
 				return fmt.Errorf("error hiding secret data: %w", err)
 			}
@@ -926,8 +931,8 @@ func (s *Server) updateApp(app *appv1.Application, newApp *appv1.Application, ct
 	for i := 0; i < 10; i++ {
 		app.Spec = newApp.Spec
 		if merge {
-			app.Labels = collections.MergeStringMaps(app.Labels, newApp.Labels)
-			app.Annotations = collections.MergeStringMaps(app.Annotations, newApp.Annotations)
+			app.Labels = collections.Merge(app.Labels, newApp.Labels)
+			app.Annotations = collections.Merge(app.Annotations, newApp.Annotations)
 		} else {
 			app.Labels = newApp.Labels
 			app.Annotations = newApp.Annotations
@@ -1284,7 +1289,11 @@ func (s *Server) getApplicationClusterConfig(ctx context.Context, a *appv1.Appli
 	if err != nil {
 		return nil, fmt.Errorf("error getting cluster: %w", err)
 	}
-	config := clst.RESTConfig()
+	config, err := clst.RESTConfig()
+	if err != nil {
+		return nil, fmt.Errorf("error getting cluster REST config: %w", err)
+	}
+
 	return config, err
 }
 
@@ -1364,7 +1373,7 @@ func (s *Server) GetResource(ctx context.Context, q *application.ApplicationReso
 	if err != nil {
 		return nil, fmt.Errorf("error getting resource: %w", err)
 	}
-	obj, err = replaceSecretValues(obj)
+	obj, err = s.replaceSecretValues(obj)
 	if err != nil {
 		return nil, fmt.Errorf("error replacing secret values: %w", err)
 	}
@@ -1376,9 +1385,9 @@ func (s *Server) GetResource(ctx context.Context, q *application.ApplicationReso
 	return &application.ApplicationResourceResponse{Manifest: &manifest}, nil
 }
 
-func replaceSecretValues(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+func (s *Server) replaceSecretValues(obj *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	if obj.GetKind() == kube.SecretKind && obj.GroupVersionKind().Group == "" {
-		_, obj, err := diff.HideSecretData(nil, obj)
+		_, obj, err := diff.HideSecretData(nil, obj, s.settingsMgr.GetSensitiveAnnotations())
 		if err != nil {
 			return nil, err
 		}
@@ -1415,7 +1424,7 @@ func (s *Server) PatchResource(ctx context.Context, q *application.ApplicationRe
 	if manifest == nil {
 		return nil, fmt.Errorf("failed to patch resource: manifest was nil")
 	}
-	manifest, err = replaceSecretValues(manifest)
+	manifest, err = s.replaceSecretValues(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("error replacing secret values: %w", err)
 	}
@@ -1889,7 +1898,11 @@ func (s *Server) Sync(ctx context.Context, syncReq *application.ApplicationSyncR
 
 	s.inferResourcesStatusHealth(a)
 
-	if !proj.Spec.SyncWindows.Matches(a).CanSync(true) {
+	canSync, err := proj.Spec.SyncWindows.Matches(a).CanSync(true)
+	if err != nil {
+		return a, status.Errorf(codes.PermissionDenied, "cannot sync: invalid sync window: %v", err)
+	}
+	if !canSync {
 		return a, status.Errorf(codes.PermissionDenied, "cannot sync: blocked by sync window")
 	}
 
@@ -2171,7 +2184,7 @@ func (s *Server) ListResourceLinks(ctx context.Context, req *application.Applica
 		return nil, fmt.Errorf("failed to read application deep links from configmap: %w", err)
 	}
 
-	obj, err = replaceSecretValues(obj)
+	obj, err = s.replaceSecretValues(obj)
 	if err != nil {
 		return nil, fmt.Errorf("error replacing secret values: %w", err)
 	}
@@ -2606,10 +2619,17 @@ func (s *Server) GetApplicationSyncWindows(ctx context.Context, q *application.A
 	}
 
 	windows := proj.Spec.SyncWindows.Matches(a)
-	sync := windows.CanSync(true)
+	sync, err := windows.CanSync(true)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sync windows: %w", err)
+	}
 
+	activeWindows, err := windows.Active()
+	if err != nil {
+		return nil, fmt.Errorf("invalid sync windows: %w", err)
+	}
 	res := &application.ApplicationSyncWindowsResponse{
-		ActiveWindows:   convertSyncWindows(windows.Active()),
+		ActiveWindows:   convertSyncWindows(activeWindows),
 		AssignedWindows: convertSyncWindows(windows),
 		CanSync:         &sync,
 	}

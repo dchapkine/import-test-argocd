@@ -291,7 +291,7 @@ function renderGroupedNodes(props: ApplicationResourceTreeProps, node: {count: n
                     className='application-resource-tree__node-title application-resource-tree__direction-center-left'
                     onClick={() => props.onGroupdNodeClick && props.onGroupdNodeClick(node.groupedNodeIds)}
                     title={`Click to see details of ${node.count} collapsed ${node.kind} and doesn't contains any active pods`}>
-                    {node.count} {node.kind}s
+                    {node.count} {node.kind.endsWith('s') ? node.kind : `${node.kind}s`}
                     <span style={{paddingLeft: '.5em', fontSize: 'small'}}>
                         {node.kind === 'ReplicaSet' ? (
                             <i
@@ -1257,7 +1257,7 @@ export const ApplicationResourceTree = (props: ApplicationResourceTreeProps) => 
                 onPointerUp={onGraphDragEnd}
                 onPointerLeave={onGraphDragEnd}
                 className={classNames('application-resource-tree', {'application-resource-tree--network': props.useNetworkingHierarchy})}
-                style={{width: size.width + 150, height: size.height + 250, transformOrigin: '0% 0%', transform: `scale(${props.zoom})`}}>
+                style={{width: size.width + 150, height: size.height + 250, transformOrigin: '0% 4%', transform: `scale(${props.zoom})`}}>
                 {graphNodes.map(key => {
                     const node = graph.node(key);
                     const nodeType = node.type;
