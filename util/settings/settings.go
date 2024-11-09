@@ -50,6 +50,8 @@ type ArgoCDSettings struct {
 	// URL is the externally facing URL users will visit to reach Argo CD.
 	// The value here is used when configuring SSO. Omitting this value will disable SSO.
 	URL string `json:"url,omitempty"`
+	// JWKSConfig contains the JWKS configuration for JWT verification
+	JWKSConfig *JWKSConfig `json:"jwksConfig,omitempty"`
 	// URLs is a list of externally facing URLs users will visit to reach Argo CD.
 	// The value here is used when configuring SSO reachable from multiple domains.
 	AdditionalURLs []string `json:"additionalUrls,omitempty"`
@@ -181,6 +183,22 @@ func (o *oidcConfig) toExported() *OIDCConfig {
 		EnablePKCEAuthentication: o.EnablePKCEAuthentication,
 		DomainHint:               o.DomainHint,
 	}
+}
+
+// JWKSConfig contains settings for JWKS-based JWT verification
+type JWKSConfig struct {
+	// URL of the JWKS endpoint
+	URL string `json:"url,omitempty"`
+	// Header to check for the JWT
+	Header string `json:"header,omitempty"`
+	// AllowedIssuers is a list of allowed token issuers
+	AllowedIssuers []string `json:"allowedIssuers,omitempty"`
+	// AllowedAudiences is a list of allowed token audiences
+	AllowedAudiences []string `json:"allowedAudiences,omitempty"`
+	// RootCA is the root certificate authority to verify JWKS endpoint
+	RootCA string `json:"rootCA,omitempty"`
+	// TLSInsecureSkipVerify skips TLS verification for JWKS endpoint
+	TLSInsecureSkipVerify bool `json:"tlsInsecureSkipVerify,omitempty"`
 }
 
 type OIDCConfig struct {
@@ -399,6 +417,14 @@ type DeepLink struct {
 }
 
 const (
+	// JWKSConfig holds configuration for JWKS-based JWT verification
+	jwksURLKey                 = "jwks.url"
+	jwksHeaderKey              = "jwks.header"
+	jwksAllowedIssuersKey     = "jwks.allowed.issuers"
+	jwksAllowedAudiencesKey   = "jwks.allowed.audiences"
+	jwksRootCAKey             = "jwks.rootCA"
+	jwksTLSInsecureSkipVerify = "jwks.tls.insecure.skip.verify"
+
 	// settingServerSignatureKey designates the key for a server secret key inside a Kubernetes secret.
 	settingServerSignatureKey = "server.secretkey"
 	// gaTrackingID holds Google Analytics tracking id
@@ -1481,6 +1507,47 @@ func getDownloadBinaryUrlsFromConfigMap(argoCDCM *apiv1.ConfigMap) map[string]st
 func updateSettingsFromConfigMap(settings *ArgoCDSettings, argoCDCM *apiv1.ConfigMap) {
 	settings.DexConfig = argoCDCM.Data[settingDexConfigKey]
 	settings.OIDCConfigRAW = argoCDCM.Data[settingsOIDCConfigKey]
+
+	// Parse JWKS settings
+	if jwksURL, ok := argoCDCM.Data[jwksURLKey]; ok && jwksURL != "" {
+		if settings.JWKSConfig == nil {
+			settings.JWKSConfig = &JWKSConfig{}
+		}
+		settings.JWKSConfig.URL = jwksURL
+		settings.JWKSConfig.Header = argoCDCM.Data[jwksHeaderKey]
+		
+		// Parse allowed issuers
+		if issuers, ok := argoCDCM.Data[jwksAllowedIssuersKey]; ok && issuers != "" {
+			var allowedIssuers []string
+			err := yaml.Unmarshal([]byte(issuers), &allowedIssuers)
+			if err != nil {
+				log.Warnf("Failed to parse jwks allowed issuers: %v", err)
+			} else {
+				settings.JWKSConfig.AllowedIssuers = allowedIssuers
+			}
+		}
+
+		// Parse allowed audiences
+		if audiences, ok := argoCDCM.Data[jwksAllowedAudiencesKey]; ok && audiences != "" {
+			var allowedAudiences []string
+			err := yaml.Unmarshal([]byte(audiences), &allowedAudiences)
+			if err != nil {
+				log.Warnf("Failed to parse jwks allowed audiences: %v", err)
+			} else {
+				settings.JWKSConfig.AllowedAudiences = allowedAudiences
+			}
+		}
+
+		// Parse root CA
+		if rootCA, ok := argoCDCM.Data[jwksRootCAKey]; ok {
+			settings.JWKSConfig.RootCA = rootCA
+		}
+
+		// Parse TLS insecure skip verify
+		if skipVerify, ok := argoCDCM.Data[jwksTLSInsecureSkipVerify]; ok {
+			settings.JWKSConfig.TLSInsecureSkipVerify = skipVerify == "true"
+		}
+	}
 	settings.KustomizeBuildOptions = argoCDCM.Data[kustomizeBuildOptionsKey]
 	settings.StatusBadgeEnabled = argoCDCM.Data[statusBadgeEnabledKey] == "true"
 	settings.StatusBadgeRootUrl = argoCDCM.Data[statusBadgeRootUrlKey]
