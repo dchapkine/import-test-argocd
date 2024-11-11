@@ -520,23 +520,41 @@ func (mgr *SessionManager) VerifyToken(tokenString string) (jwt.Claims, string, 
 	if err != nil {
 		return nil, "", err
 	}
+
+	argoSettings, err := mgr.settingsMgr.GetSettings()
+	if err != nil {
+		return nil, "", fmt.Errorf("cannot access settings while verifying the token: %w", err)
+	}
+	if argoSettings == nil {
+		return nil, "", fmt.Errorf("settings are not available while verifying the token")
+	}
+
 	switch claims.Issuer {
 	case SessionManagerClaimsIssuer:
 		// Argo CD signed token
 		return mgr.Parse(tokenString)
+	case "jwks":
+		// JWKS signed token
+		if argoSettings.JWKSConfig == nil {
+			return nil, "", fmt.Errorf("JWKS configuration is not available")
+		}
+
+		verifier, err := NewJWKSVerifier(argoSettings.JWKSConfig, mgr.client)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create JWKS verifier: %w", err)
+		}
+
+		claims, err := verifier.VerifyToken(tokenString)
+		if err != nil {
+			log.Warnf("Failed to verify JWKS token: %v", err)
+			return nil, "", common.TokenVerificationErr
+		}
+		return claims, "", nil
 	default:
 		// IDP signed token
 		prov, err := mgr.provider()
 		if err != nil {
 			return nil, "", err
-		}
-
-		argoSettings, err := mgr.settingsMgr.GetSettings()
-		if err != nil {
-			return nil, "", fmt.Errorf("cannot access settings while verifying the token: %w", err)
-		}
-		if argoSettings == nil {
-			return nil, "", fmt.Errorf("settings are not available while verifying the token")
 		}
 
 		idToken, err := prov.Verify(tokenString, argoSettings)
